@@ -1,0 +1,11 @@
+/* Add any custom CSS overrides or styles not easily achievable with Tailwind */
+body {
+    /* Example: Ensure smooth scrolling if needed */
+    /* scroll-behavior: smooth; */
+}
+
+/* Fix for potential prose-code spacing issue in some Tailwind versions */
+.prose code::before,
+.prose code::after {
+    content: "" !important;
+}
