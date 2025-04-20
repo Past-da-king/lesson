@@ -1,20 +1,26 @@
-// Get references to key HTML elements
+// --- Get references to key HTML elements ---
 const lessonForm = document.getElementById('lesson-form');
 const pdfFileInput = document.getElementById('pdf-file');
-// const questionDescriptionInput = document.getElementById('question-description'); // No longer needed here
-const generateButton = document.getElementById('generate-button'); // This button now triggers EXTRACTION
+const uploadDropZone = document.getElementById('upload-drop-zone'); // The drop zone div
+const dropZoneText = document.getElementById('drop-zone-text'); // Text inside drop zone
+const selectedFileNameEl = document.getElementById('selected-file-name'); // To display filename
+const generateButton = document.getElementById('generate-button');
 const buttonText = document.getElementById('button-text');
 const loadingSpinner = document.getElementById('button-loading-spinner');
-// REMOVED: const errorMessageDiv = document.getElementById('error-message'); // This ID doesn't exist
+const uploadErrorMessageDiv = document.getElementById('upload-error-message');
 const uploadSection = document.getElementById('upload-section');
 
-// New section for displaying extracted questions
+// Question List Section elements
 const questionListSection = document.getElementById('question-list-section');
 const extractedQuestionsListEl = document.getElementById('extracted-questions');
-const questionListLoadingEl = document.getElementById('question-list-loading'); // Ensure this ID exists if used
+const questionListErrorMessageDiv = document.getElementById('question-list-error-message'); // Specific error div for this stage
 
-// Lesson display section
+// Lesson Display Section elements
 const lessonSection = document.getElementById('lesson-section');
+const lessonSkeletonLoader = document.getElementById('lesson-skeleton-loader'); // Skeleton placeholder
+const lessonHeaderSkeleton = document.getElementById('lesson-header-skeleton'); // Skeleton for header
+const lessonHeaderContent = document.getElementById('lesson-header-content'); // Actual header content
+const lessonContentArea = document.getElementById('lesson-content-area');    // Wrapper for actual content
 const lessonTitleEl = document.getElementById('lesson-title');
 const lessonSubheaderEl = document.getElementById('lesson-subheader');
 const lessonConceptEl = document.getElementById('lesson-concept');
@@ -22,130 +28,170 @@ const lessonStepsTimelineEl = document.getElementById('lesson-steps-timeline');
 const lessonImageContainerEl = document.getElementById('lesson-image-container');
 const lessonHintsContainerEl = document.getElementById('lesson-hints-container');
 const lessonHintsEl = document.getElementById('lesson-hints');
-const backToUploadButton = document.getElementById('back-to-upload-button'); // Ensure this ID exists if used
-const backToQuestionsButton = document.getElementById('back-to-questions-button'); // Ensure this ID exists
+const lessonErrorMessageDiv = document.getElementById('lesson-error-message'); // Specific error div for lesson stage
+const backToQuestionsButton = document.getElementById('back-to-questions-button');
+const backToUploadButton = document.getElementById('back-to-upload-button');
 
-// Store the PDF File ID from the extraction step
+
+// Global state
 let currentPdfFileId = null;
+let currentExtractedQuestions = []; // Store extracted questions
 
-// --- Event Listener for Initial PDF Upload (Triggers Question Extraction) ---
-lessonForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
+// --- Event Listeners ---
 
-    const pdfFile = pdfFileInput.files[0];
+// Trigger hidden file input click when drop zone is clicked
+if (uploadDropZone) {
+    uploadDropZone.addEventListener('click', () => {
+        if (pdfFileInput) pdfFileInput.click();
+    });
+} else {
+    console.error("Upload drop zone element not found!");
+}
 
-    if (!pdfFile) {
-        showError("Please select a PDF file.", "upload-error"); // Specify which error div
-        return;
+
+// Handle file selection (show filename)
+if (pdfFileInput) {
+    pdfFileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file && selectedFileNameEl) {
+            selectedFileNameEl.textContent = `Selected: ${file.name}`;
+            hideError("upload"); // Hide error if user selects a valid file
+        } else if (selectedFileNameEl) {
+            selectedFileNameEl.textContent = ''; // Clear if no file selected
+        }
+    });
+}
+
+
+// Drag and Drop functionality (Optional but enhances UX)
+if (uploadDropZone) {
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        uploadDropZone.addEventListener(eventName, preventDefaults, false);
+    });
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
     }
 
-    // Pass button text to loading state function
-    setLoadingState(true, 'Extracting Questions...');
-    hideError("upload-error"); // Specify which error div to hide
-    hideError("lesson-error");
-    hideQuestionList();
-    hideLesson();
+    uploadDropZone.addEventListener('dragenter', () => uploadDropZone.classList.add('dragover'), false);
+    uploadDropZone.addEventListener('dragover', () => uploadDropZone.classList.add('dragover'), false);
+    uploadDropZone.addEventListener('dragleave', () => uploadDropZone.classList.remove('dragover'), false);
 
-    const formData = new FormData();
-    formData.append('pdf_file', pdfFile);
+    uploadDropZone.addEventListener('drop', (e) => {
+        uploadDropZone.classList.remove('dragover');
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files.length > 0) {
+            // Check if it's a PDF
+            if (files[0].type === "application/pdf") {
+                pdfFileInput.files = files; // Assign dropped file to the input
+                // Trigger the change event manually to update the UI
+                const changeEvent = new Event('change');
+                pdfFileInput.dispatchEvent(changeEvent);
+            } else {
+                showError("Please drop a PDF file only.", "upload");
+                if (selectedFileNameEl) selectedFileNameEl.textContent = '';
+            }
+        }
+    }, false);
+}
 
-    try {
-        // --- Call the /extract-questions endpoint ---
-        const response = await fetch('/extract-questions', {
-            method: 'POST',
-            body: formData,
-        });
+// Form submission for EXTRACTING questions
+if (lessonForm) {
+    lessonForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const pdfFile = pdfFileInput.files[0];
 
-        const result = await response.json(); // Expects QuestionListResponse
-
-        if (!response.ok) {
-            throw new Error(result.detail || `HTTP error! status: ${response.status}`);
+        if (!pdfFile) {
+            showError("Please select or drop a PDF file.", "upload");
+            return;
         }
 
-        // --- Process Successful Extraction ---
-        console.log("Extracted questions data:", result);
-        if (!result.pdfFileId || !result.questions) {
-            throw new Error("Invalid data received from server after extraction.");
+        setLoadingState(true, 'Extracting Questions...');
+        hideError("upload");
+        hideError("question-list"); // Use specific IDs
+        hideError("lesson");
+        hideQuestionList();
+        hideLesson();
+
+        const formData = new FormData();
+        formData.append('pdf_file', pdfFile);
+
+        try {
+            const response = await fetch('/extract-questions', { method: 'POST', body: formData });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.detail || `HTTP error! Status: ${response.status}`);
+
+            console.log("Extracted questions data:", result);
+            if (!result.pdfFileId || !result.questions) throw new Error("Invalid data structure received.");
+
+            currentPdfFileId = result.pdfFileId;
+            currentExtractedQuestions = result.questions; // Store questions
+            displayQuestionList(result.questions);
+            showQuestionList();
+            hideUploadForm();
+
+        } catch (error) {
+            console.error('Error extracting questions:', error);
+            showError(`Extraction failed: ${error.message}`, "upload");
+        } finally {
+            setLoadingState(false, 'Extract Questions');
         }
-        currentPdfFileId = result.pdfFileId; // Store the File ID
-        displayQuestionList(result.questions);
-        showQuestionList();
-        hideUploadForm(); // Hide upload form, show question list
+    });
+}
 
-    } catch (error) {
-        console.error('Error extracting questions:', error);
-        showError(`Failed to extract questions: ${error.message}`, "upload-error"); // Show in upload error div
-    } finally {
-        // Reset button text specifically for extraction
-        setLoadingState(false, 'Extract Questions');
-    }
-});
-
-// --- Function to Display Extracted Questions ---
+// --- Display Questions ---
 function displayQuestionList(questions) {
-    // Ensure the target element exists before modifying it
-    if (!extractedQuestionsListEl) {
-        console.error("Element with ID 'extracted-questions' not found.");
-        showError("UI Error: Could not display questions.", "upload-error");
-        return;
-    }
-    extractedQuestionsListEl.innerHTML = ''; // Clear previous list
+    if (!extractedQuestionsListEl) return;
+    extractedQuestionsListEl.innerHTML = '';
     if (!questions || questions.length === 0) {
-        const li = document.createElement('li');
-        li.textContent = "No questions were extracted from this PDF, or the AI couldn't identify them.";
-        li.className = "text-gray-500 italic p-4"; // Add some padding
-        extractedQuestionsListEl.appendChild(li);
+        extractedQuestionsListEl.innerHTML = `<li class="text-gray-500 italic p-4">No questions were extracted. Check the PDF or try describing the section.</li>`;
         return;
     }
 
-    questions.forEach(q => {
+    questions.forEach((q, index) => { // Add index for fallback ID
         const li = document.createElement('li');
-        // Make sure questionId and questionText exist
-        const qId = q.questionId || `unknown-${Math.random().toString(16).slice(2)}`; // Fallback ID
+        const qId = q.questionId || `item-${index}`; // Use index as fallback ID
         const qText = q.questionText || "Question text missing";
 
         li.className = 'border border-gray-200 p-4 rounded-md hover:bg-indigo-50 cursor-pointer transition duration-150 flex justify-between items-center';
         li.innerHTML = `
-            <div class="flex-grow mr-4 overflow-hidden"> <!-- Added overflow-hidden -->
-                <span class="font-semibold text-indigo-700 block text-sm truncate">Q-ID: ${qId}</span> <!-- Added truncate -->
-                <span class="text-gray-800 block mt-1 text-sm">${qText.substring(0, 120)}...</span> <!-- Limit text length -->
+            <div class="flex-grow mr-4 overflow-hidden">
+                <span class="font-semibold text-indigo-700 block text-sm truncate">Detected Question (ID: ${qId})</span>
+                <span class="text-gray-800 block mt-1 text-sm">${qText.substring(0, 120)}...</span>
             </div>
             <svg class="w-6 h-6 text-indigo-500 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
         `;
         li.dataset.questionId = qId;
-        li.dataset.questionText = qText; // Store full text
+        li.dataset.questionText = qText;
         li.addEventListener('click', handleQuestionSelection);
         extractedQuestionsListEl.appendChild(li);
     });
 }
 
-// --- Event Handler for Clicking a Question in the List ---
+// --- Generate Specific Lesson ---
 async function handleQuestionSelection(event) {
     const listItem = event.currentTarget;
     const selectedQuestionId = listItem.dataset.questionId;
     const selectedQuestionText = listItem.dataset.questionText;
 
     if (!currentPdfFileId || !selectedQuestionId) {
-        showError("Missing PDF reference or Question ID. Please try uploading again.", "lesson-error");
+        showError("Missing PDF reference or Question ID.", "question-list"); // Show error in question list area
         return;
     }
 
-    console.log(`Requesting lesson for Question ID: ${selectedQuestionId} from PDF: ${currentPdfFileId}`);
-    showLoadingIndicator("lesson-loading");
+    console.log(`Requesting lesson for Q ID: ${selectedQuestionId} from PDF: ${currentPdfFileId}`);
     hideQuestionList();
-    showLesson(); // Show the lesson container (with loading indicator inside)
-    // Clear previous lesson content before loading new one
-    clearLessonContent();
-    hideError("lesson-error");
+    showLesson(); // Show the lesson section container
+    showSkeletonLoader(); // Show the skeleton WHILE fetching
+    hideError("lesson"); // Hide previous lesson errors
 
 
     try {
-        // --- Call the /generate-specific-lesson endpoint ---
         const response = await fetch('/generate-specific-lesson', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 pdfFileId: currentPdfFileId,
                 selectedQuestionId: selectedQuestionId,
@@ -153,98 +199,80 @@ async function handleQuestionSelection(event) {
             }),
         });
 
-        const result = await response.json(); // Expects LessonResponse
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || `HTTP error! Status: ${response.status}`);
 
-        if (!response.ok) {
-            throw new Error(result.detail || `HTTP error! status: ${response.status}`);
-        }
-
-        // --- Process Successful Lesson Generation ---
         console.log("Received specific lesson data:", result);
-        displayLesson(result); // Display the actual lesson content
+        displayLesson(result); // Populate the hidden content area
+        showActualLessonContent(); // Hide skeleton, show content
 
     } catch (error) {
         console.error('Error generating specific lesson:', error);
-        showError(`Failed to generate lesson for question ${selectedQuestionId}: ${error.message}`, "lesson-error");
-        // Hide lesson area, show question list again on error? Or show error within lesson area?
-        // Let's show the error within the lesson area for now.
-        clearLessonContent(); // Clear partially loaded stuff if any
-    } finally {
-        hideLoadingIndicator("lesson-loading");
+        hideSkeletonLoader(); // Hide skeleton on error too
+        showError(`Failed to generate lesson: ${error.message}`, "lesson"); // Show error within lesson section
     }
+    // No 'finally hideSkeletonLoader' here, it's hidden on success/error explicitly
 }
 
-
-// --- UI Visibility and State Functions ---
+// --- UI Visibility & State ---
 
 function setLoadingState(isLoading, text = 'Generate Lesson') {
-    // Check if elements exist before manipulating them
     if(!generateButton || !buttonText || !loadingSpinner) return;
-
-    if (isLoading) {
-        generateButton.disabled = true;
-        buttonText.textContent = text;
-        loadingSpinner.classList.remove('hidden');
-    } else {
-        generateButton.disabled = false;
-        buttonText.textContent = text; // Use passed text for reset state too
-        loadingSpinner.classList.add('hidden');
-    }
+    generateButton.disabled = isLoading;
+    buttonText.textContent = text;
+    loadingSpinner.classList.toggle('hidden', !isLoading);
 }
 
-function showError(message, type = "upload") { // Default to upload error div
-    const errorDivId = (type === "lesson") ? "lesson-error-message" : "upload-error-message";
+function showError(message, type = "upload") {
+    const errorDivId = `${type}-error-message`; // Construct ID dynamically
     const errorDiv = document.getElementById(errorDivId);
-    if(errorDiv) {
+    if (errorDiv) {
         errorDiv.textContent = message;
         errorDiv.classList.remove('hidden');
     } else {
         console.error(`Error div with ID '${errorDivId}' not found!`);
-        // Fallback alert if the designated div doesn't exist
-        alert(`Error: ${message}`);
+        alert(`Error: ${message}`); // Fallback
     }
 }
 
 function hideError(type = "upload") {
-     const errorDivId = (type === "lesson") ? "lesson-error-message" : "upload-error-message";
-     const errorDiv = document.getElementById(errorDivId);
-     if(errorDiv) {
+    const errorDivId = `${type}-error-message`;
+    const errorDiv = document.getElementById(errorDivId);
+    if(errorDiv) {
         errorDiv.classList.add('hidden');
         errorDiv.textContent = '';
      }
 }
 
 function showQuestionList() {
-    const section = document.getElementById('question-list-section');
-    if(section) {
-        section.classList.remove('hidden');
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (questionListSection) {
+        questionListSection.classList.remove('hidden');
+        questionListSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 
 function hideQuestionList() {
-    const section = document.getElementById('question-list-section');
-    const listEl = document.getElementById('extracted-questions');
-    if(section) section.classList.add('hidden');
-    if(listEl) listEl.innerHTML = ''; // Clear list when hiding
+    if (questionListSection) questionListSection.classList.add('hidden');
+    // Don't clear the list here, only when displaying new data or resetting
 }
 
 function showLesson() {
-    const section = document.getElementById('lesson-section');
-    if(section) {
-         section.classList.remove('hidden');
-         section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if(lessonSection) {
+        lessonSection.classList.remove('hidden');
+        lessonSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 
 function hideLesson() {
-     const section = document.getElementById('lesson-section');
-     if(section) section.classList.add('hidden');
-     clearLessonContent(); // Clear content when hiding
+     if(lessonSection) lessonSection.classList.add('hidden');
+     clearLessonContent();
+     hideSkeletonLoader(); // Ensure skeleton is also hidden
 }
 
 function clearLessonContent() {
-    // Clear previous lesson content (ensure elements exist)
+    // Clear actual content areas
+     if(lessonHeaderContent) lessonHeaderContent.classList.add('hidden'); // Hide actual header
+     if(lessonContentArea) lessonContentArea.classList.add('hidden');    // Hide actual body
      if(lessonTitleEl) lessonTitleEl.textContent = '';
      if(lessonSubheaderEl) lessonSubheaderEl.textContent = '';
      if(lessonConceptEl) lessonConceptEl.innerHTML = '';
@@ -254,59 +282,62 @@ function clearLessonContent() {
      if(lessonHintsContainerEl) lessonHintsContainerEl.classList.add('hidden');
 }
 
+function showSkeletonLoader() {
+    if (lessonSkeletonLoader) lessonSkeletonLoader.classList.remove('hidden');
+    if (lessonHeaderSkeleton) lessonHeaderSkeleton.classList.remove('hidden'); // Show header skeleton
+    if (lessonContentArea) lessonContentArea.classList.add('hidden');    // Hide real content wrapper
+    if (lessonHeaderContent) lessonHeaderContent.classList.add('hidden'); // Hide real header wrapper
+}
+
+function hideSkeletonLoader() {
+    if (lessonSkeletonLoader) lessonSkeletonLoader.classList.add('hidden');
+    if (lessonHeaderSkeleton) lessonHeaderSkeleton.classList.add('hidden');
+}
+
+function showActualLessonContent() {
+    hideSkeletonLoader(); // Hide skeleton first
+    if (lessonContentArea) lessonContentArea.classList.remove('hidden');    // Show real content wrapper
+    if (lessonHeaderContent) lessonHeaderContent.classList.remove('hidden'); // Show real header wrapper
+}
+
 
 function showUploadForm() {
-    const section = document.getElementById('upload-section');
-    if(section) section.classList.remove('hidden');
+    if(uploadSection) uploadSection.classList.remove('hidden');
 }
 
 function hideUploadForm() {
-     const section = document.getElementById('upload-section');
-     if(section) section.classList.add('hidden');
+     if(uploadSection) uploadSection.classList.add('hidden');
 }
 
-// Global function called by buttons
 function resetUI() {
     hideLesson();
     hideQuestionList();
-    hideError("upload"); // Use type parameter
+    if (extractedQuestionsListEl) extractedQuestionsListEl.innerHTML = ''; // Clear list
+    hideError("upload");
+    hideError("question-list");
     hideError("lesson");
     if (lessonForm) lessonForm.reset();
+    if (selectedFileNameEl) selectedFileNameEl.textContent = ''; // Clear selected filename
     showUploadForm();
     currentPdfFileId = null;
+    currentExtractedQuestions = [];
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function showLoadingIndicator(elementId) {
-    const indicator = document.getElementById(elementId);
-    // Ensure the lesson content area is hidden while loading indicator is shown
-    const contentArea = document.getElementById('lesson-content-area');
-    if (indicator) indicator.classList.remove('hidden');
-    if (contentArea) contentArea.classList.add('hidden');
-}
-
-function hideLoadingIndicator(elementId) {
-    const indicator = document.getElementById(elementId);
-     // Ensure the lesson content area is shown when loading indicator is hidden
-     const contentArea = document.getElementById('lesson-content-area');
-    if (indicator) indicator.classList.add('hidden');
-    if (contentArea) contentArea.classList.remove('hidden');
-}
-
-
-// --- Functions to Render Lesson Content ---
+// --- Render Lesson Content ---
 function displayLesson(lessonResponse) {
     const lessonData = lessonResponse.lessonData;
     if (!lessonData) {
-        showError("Received invalid lesson data structure from server.", "lesson");
+        showError("Received invalid lesson data structure.", "lesson");
         return;
     }
-    // Ensure elements exist before setting content
+    // Populate Header
     if(lessonTitleEl) lessonTitleEl.textContent = `Lesson for: ${lessonData.questionText}`;
     if(lessonSubheaderEl) lessonSubheaderEl.textContent = `Subject: ${lessonData.subject} | Topic: ${lessonData.topic} | Q-ID: ${lessonData.questionId}`;
-    if(lessonConceptEl) lessonConceptEl.innerHTML = lessonData.coreConceptHtml;
 
-    if(lessonStepsTimelineEl) lessonStepsTimelineEl.innerHTML = ''; // Clear previous steps
+    // Populate Body
+    if(lessonConceptEl) lessonConceptEl.innerHTML = lessonData.coreConceptHtml;
+    if(lessonStepsTimelineEl) lessonStepsTimelineEl.innerHTML = '';
     let stepDelay = 0;
     const delayIncrement = 0.1;
     lessonData.steps.forEach(step => {
@@ -316,20 +347,16 @@ function displayLesson(lessonResponse) {
     });
 
     if(lessonImageContainerEl){
-        if (lessonData.visualAid && lessonData.visualAid.isPresent) {
-            lessonImageContainerEl.classList.remove('hidden');
-        } else {
-            lessonImageContainerEl.classList.add('hidden');
-        }
+        lessonImageContainerEl.classList.toggle('hidden', !(lessonData.visualAid && lessonData.visualAid.isPresent));
     }
 
-    if(lessonHintsEl) lessonHintsEl.innerHTML = ''; // Clear previous hints
-    if(lessonHintsContainerEl) lessonHintsContainerEl.classList.add('hidden'); // Default hide
+    if(lessonHintsEl) lessonHintsEl.innerHTML = '';
+    if(lessonHintsContainerEl) lessonHintsContainerEl.classList.add('hidden');
     if (lessonData.hints && lessonData.hints.length > 0) {
         if(lessonHintsContainerEl) lessonHintsContainerEl.classList.remove('hidden');
         lessonData.hints.forEach(hint => {
             const li = document.createElement('li');
-            li.innerHTML = hint; // Render potential simple HTML in hints
+            li.innerHTML = hint;
            if(lessonHintsEl) lessonHintsEl.appendChild(li);
         });
     }
@@ -343,7 +370,7 @@ function createTimelineStepElement(stepNumber, title, descriptionHtml, delay) {
     stepElement.innerHTML = `
         ${iconSVG}
         <div class="ml-3">
-             <div class="timeline-step-header mb-0"> <!-- Removed mb-2 -->
+             <div class="timeline-step-header mb-0">
                 <h4 class="text-lg font-semibold text-indigo-800">${title}</h4>
              </div>
             <div class="timeline-step-content prose prose-sm max-w-none text-gray-600 leading-relaxed">
@@ -353,17 +380,10 @@ function createTimelineStepElement(stepNumber, title, descriptionHtml, delay) {
     return stepElement;
 }
 
-
 // --- Initial UI State ---
 function initializeUI() {
     console.log("Initializing UI...");
-    hideLesson();
-    hideQuestionList();
-    // Optionally hide error messages on load too
-    hideError("upload");
-    hideError("lesson");
-    // Ensure upload form is visible
-    showUploadForm();
+    resetUI(); // Use resetUI to set the initial state
 }
 
 // Run initialization when the script loads
