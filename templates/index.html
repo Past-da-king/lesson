@@ -12,19 +12,25 @@
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f9fafb; }
         .premium-card { background-color: white; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.05); border: 1px solid #e5e7eb; }
-        /* Styles for the drop zone */
+        /* Drop zone styles */
         .file-drop-zone { border: 2px dashed #d1d5db; background-color: #f9fafb; transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out; }
         .file-drop-zone:hover { background-color: #f3f4f6; border-color: #6366f1; }
         .file-drop-zone.dragover { background-color: #e0e7ff; border-color: #4f46e5; border-style: solid; }
         /* Skeleton styles */
         .skeleton { background-color: #e5e7eb; border-radius: 4px; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-        .skeleton-line { height: 0.75rem; /* h-3 */ margin-bottom: 0.5rem; /* mb-2 */ }
-        .skeleton-block { height: 8rem; /* h-32 */ }
+        .skeleton-line { height: 0.75rem; margin-bottom: 0.5rem; }
+        .skeleton-line-short { width: 60%; }
+        .skeleton-line-long { width: 90%; }
+        .skeleton-block { height: 8rem; }
         .skeleton-title { height: 1.5rem; width: 60%; margin-bottom: 1rem; }
         .skeleton-text-short { height: 0.75rem; width: 80%; margin-bottom: 0.5rem; }
         .skeleton-text-long { height: 0.75rem; width: 95%; margin-bottom: 0.5rem; }
-        .skeleton-avatar { width: 2.5rem; height: 2.5rem; border-radius: 9999px; } /* w-10 h-10 rounded-full */
+        .skeleton-avatar { width: 2.5rem; height: 2.5rem; border-radius: 9999px; }
+        /* Question List Skeleton Item */
+        .skeleton-list-item { border: 1px solid #e5e7eb; padding: 1rem; border-radius: 0.375rem; display: flex; align-items: center; margin-bottom: 1rem; }
+        .skeleton-list-icon { width: 1.5rem; height: 1.5rem; background-color: #d1d5db; border-radius: 4px; margin-left: auto; /* Push icon to the right */ }
+
 
         /* Basic hidden utility */
         .hidden { display: none; }
@@ -57,13 +63,12 @@
                  <p class="text-lg text-gray-500 mb-8">Drop your exam PDF below or click to select a file.</p>
 
                  <form id="lesson-form">
-                     <!-- Styled Drop Zone -->
                      <div id="upload-drop-zone" class="file-drop-zone rounded-xl p-10 md:p-16 text-center cursor-pointer mb-6">
                          <input type="file" id="pdf-file" name="pdf_file" accept="application/pdf" required class="hidden">
                          <svg class="mx-auto h-16 w-16 text-gray-400 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" /></svg>
                          <p id="drop-zone-text" class="text-lg font-semibold text-gray-700 mb-1">Drag & drop PDF here</p>
                          <p class="text-sm text-gray-500 mb-4">or click to select file</p>
-                         <p id="selected-file-name" class="text-sm text-indigo-700 font-medium mt-2"></p> <!-- To show selected file -->
+                         <p id="selected-file-name" class="text-sm text-indigo-700 font-medium mt-2"></p>
                      </div>
 
                      <button type="submit" id="generate-button"
@@ -82,9 +87,35 @@
                      Upload Different PDF
                  </button>
                  <h2 class="text-3xl font-bold mb-2 text-gray-800">2. Select a Question</h2>
-                 <p class="text-lg text-gray-500 mb-8">Click on a question below to get a detailed explanation.</p>
-                 <!-- No separate loading indicator needed here, button state is enough -->
-                 <ul id="extracted-questions" class="space-y-4">
+                 <p class="text-lg text-gray-500 mb-8">We're extracting the questions from your PDF. Click one below when they appear.</p>
+
+                 <!-- Question List Skeleton Loader -->
+                 <div id="question-list-skeleton" class="space-y-4">
+                     <div class="skeleton-list-item">
+                         <div class="flex-1 space-y-2 pr-4">
+                             <div class="skeleton skeleton-line skeleton-line-short bg-indigo-200 h-4"></div>
+                             <div class="skeleton skeleton-line skeleton-line-long h-3"></div>
+                         </div>
+                         <div class="skeleton skeleton-list-icon"></div>
+                     </div>
+                     <div class="skeleton-list-item">
+                          <div class="flex-1 space-y-2 pr-4">
+                             <div class="skeleton skeleton-line skeleton-line-short bg-indigo-200 h-4"></div>
+                             <div class="skeleton skeleton-line skeleton-line-long h-3"></div>
+                         </div>
+                         <div class="skeleton skeleton-list-icon"></div>
+                     </div>
+                     <div class="skeleton-list-item">
+                          <div class="flex-1 space-y-2 pr-4">
+                             <div class="skeleton skeleton-line skeleton-line-short bg-indigo-200 h-4"></div>
+                             <div class="skeleton skeleton-line skeleton-line-long h-3"></div>
+                         </div>
+                         <div class="skeleton skeleton-list-icon"></div>
+                     </div>
+                 </div>
+
+                 <!-- Actual Question List (Initially Hidden by Skeleton) -->
+                 <ul id="extracted-questions" class="space-y-4 hidden">
                      <!-- Populated by JS -->
                  </ul>
                  <div id="question-list-error-message" class="mt-6 p-4 bg-red-100 border border-red-300 text-red-700 rounded-md text-sm hidden"></div>
@@ -92,17 +123,19 @@
 
              <!-- === Lesson Display Section (Initially Hidden) === -->
              <div id="lesson-section" class="hidden">
+                <!-- Back Buttons -->
                  <button id="back-to-questions-button" onclick="showQuestionList(); hideLesson();" class="mb-6 inline-flex items-center text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition duration-150">
                      <svg class="w-5 h-5 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                     Back to Question List
-                 </button>
+                    Back to Question List
+                </button>
                  <button id="back-to-upload-button" onclick="resetUI()" class="mb-6 ml-4 inline-flex items-center text-sm font-semibold text-gray-600 hover:text-gray-800 transition duration-150">
                      <svg class="w-5 h-5 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
-                     Start Over (New PDF)
-                 </button>
+                    Start Over (New PDF)
+                </button>
 
+                <!-- Lesson Content Card -->
                  <div class="premium-card">
-                     <!-- Lesson Header (Part of Skeleton) -->
+                     <!-- Header Section (Includes Skeleton) -->
                      <div id="lesson-header-skeleton" class="bg-gradient-to-r from-indigo-200 to-purple-200 p-6 md:p-8 rounded-t-xl skeleton hidden">
                          <div class="skeleton skeleton-title bg-indigo-300 mb-3"></div>
                          <div class="skeleton skeleton-line bg-indigo-100 w-1/3"></div>
@@ -112,56 +145,24 @@
                          <p id="lesson-subheader" class="text-indigo-100 text-sm font-medium"></p>
                      </div>
 
-                     <!-- Lesson Body -->
+                     <!-- Body Section (Includes Skeleton & Content Area) -->
                      <div class="p-6 md:p-8">
-                         <!-- Skeleton Loader for Lesson Content -->
+                         <!-- Lesson Skeleton Loader -->
                          <div id="lesson-skeleton-loader" class="hidden">
-                             <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-12">
+                            <!-- Skeleton structure copied from previous response -->
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-12">
                                  <div class="lg:col-span-2 space-y-10">
-                                     <!-- Concept Skeleton -->
-                                     <div>
-                                         <div class="skeleton skeleton-line w-1/4 mb-4"></div>
-                                         <div class="skeleton skeleton-text-long"></div>
-                                         <div class="skeleton skeleton-text-long"></div>
-                                         <div class="skeleton skeleton-text-short"></div>
-                                     </div>
-                                     <!-- Steps Skeleton -->
-                                     <div>
-                                         <div class="skeleton skeleton-line w-1/3 mb-6"></div>
-                                         <div class="flex items-start space-x-4 mb-6">
-                                             <div class="skeleton skeleton-avatar bg-indigo-200"></div>
-                                             <div class="flex-1 space-y-2">
-                                                 <div class="skeleton skeleton-line w-1/2"></div>
-                                                 <div class="skeleton skeleton-text-long"></div>
-                                                 <div class="skeleton skeleton-text-short"></div>
-                                             </div>
-                                         </div>
-                                          <div class="flex items-start space-x-4 mb-6">
-                                             <div class="skeleton skeleton-avatar bg-indigo-200"></div>
-                                             <div class="flex-1 space-y-2">
-                                                 <div class="skeleton skeleton-line w-1/2"></div>
-                                                 <div class="skeleton skeleton-text-long"></div>
-                                             </div>
-                                         </div>
-                                    </div>
+                                     <div> <div class="skeleton skeleton-line w-1/4 mb-4 h-5 bg-gray-300"></div> <div class="skeleton skeleton-text-long h-3"></div> <div class="skeleton skeleton-text-long h-3"></div> <div class="skeleton skeleton-text-short h-3"></div> </div>
+                                     <div> <div class="skeleton skeleton-line w-1/3 mb-6 h-5 bg-gray-300"></div> <div class="flex items-start space-x-4 mb-6"> <div class="skeleton skeleton-avatar bg-indigo-200"></div> <div class="flex-1 space-y-2"> <div class="skeleton skeleton-line w-1/2 h-4"></div> <div class="skeleton skeleton-text-long h-3"></div> <div class="skeleton skeleton-text-short h-3"></div> </div> </div> <div class="flex items-start space-x-4 mb-6"> <div class="skeleton skeleton-avatar bg-indigo-200"></div> <div class="flex-1 space-y-2"> <div class="skeleton skeleton-line w-1/2 h-4"></div> <div class="skeleton skeleton-text-long h-3"></div> </div> </div> </div>
                                 </div>
                                 <div class="lg:col-span-1 space-y-8">
-                                     <!-- Visual Aid Skeleton -->
-                                     <div>
-                                         <div class="skeleton skeleton-line w-1/2 mb-3"></div>
-                                         <div class="skeleton skeleton-block aspect-video"></div>
-                                     </div>
-                                     <!-- Hints Skeleton -->
-                                      <div>
-                                         <div class="skeleton skeleton-line w-1/2 mb-3"></div>
-                                         <div class="skeleton skeleton-text-short"></div>
-                                         <div class="skeleton skeleton-text-short"></div>
-                                     </div>
+                                     <div> <div class="skeleton skeleton-line w-1/2 mb-3 h-4 bg-gray-300"></div> <div class="skeleton skeleton-block aspect-video"></div> </div>
+                                      <div> <div class="skeleton skeleton-line w-1/2 mb-3 h-4 bg-gray-300"></div> <div class="skeleton skeleton-text-short h-3"></div> <div class="skeleton skeleton-text-short h-3"></div> </div>
                                 </div>
                              </div>
                          </div>
 
-                         <!-- Actual Lesson Content Area (Initially Hidden by Skeleton) -->
+                         <!-- Actual Lesson Content -->
                          <div id="lesson-content-area" class="hidden">
                             <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-12">
                                 <div class="lg:col-span-2 space-y-10">
@@ -173,11 +174,11 @@
                                     <div id="lesson-hints-container" class="hidden"> <div class="bg-yellow-50 border border-yellow-200 p-5 rounded-lg shadow-sm"> <h4 class="text-lg font-semibold mb-3 flex items-center text-yellow-900"><svg class="w-5 h-5 mr-2 text-yellow-600 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.355a11.998 11.998 0 01-4.5 0m-7.5-11.978a12.049 12.049 0 014.5 0m-4.5 0a12.048 12.048 0 00-1.605 5.493a1.5 1.5 0 001.605 1.5H6a1.5 1.5 0 001.605-1.5c-.168-1.988-.747-3.829-1.605-5.493M18 12a12.048 12.048 0 01-1.605 5.493A1.5 1.5 0 0118 19.5h.008a1.5 1.5 0 011.605-1.5c.858 1.664 1.437 3.505 1.605 5.493m0-11.978a12.049 12.049 0 00-4.5 0m4.5 0a12.048 12.048 0 011.605 5.493a1.5 1.5 0 01-1.605 1.5H18a1.5 1.5 0 01-1.605-1.5c.168-1.988.747-3.829 1.605-5.493" /></svg>Key Hints & Reminders</h4> <ul id="lesson-hints" class="prose prose-sm prose-yellow max-w-none text-yellow-800 ml-1 space-y-1 list-disc list-inside"></ul> </div> </div>
                                 </div>
                             </div>
-                         </div> <!-- End #lesson-content-area -->
+                         </div>
                          <div id="lesson-error-message" class="mt-6 p-4 bg-red-100 border border-red-300 text-red-700 rounded-md text-sm hidden"></div>
-                     </div> <!-- End Lesson Body -->
-                 </div> <!-- End Lesson Premium Card -->
-             </div> <!-- End #lesson-section -->
+                     </div>
+                 </div>
+             </div>
 
         </main>
 
