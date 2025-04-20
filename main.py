@@ -1,25 +1,21 @@
+# -*- coding: utf-8 -*-
 import os
 import pathlib
-import tempfile # For creating temporary files/directories
-import shutil   # For removing temporary directories
-from typing import Optional, Union # Keep Union for response_model
+import tempfile
+import shutil
+from typing import Optional, Union
 import uvicorn
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, Body # Import Body
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-# Try importing the specific File type, fallback handled in gemini_utils
-try:
-    from google.generativeai.types import File as GeminiFile
-except ImportError:
-    GeminiFile = None # Let gemini_utils handle the 'Any' type
-
 # Import utility functions and models
 import gemini_utils
-from models import LessonResponse, ErrorResponse
+# Import all necessary response models
+from models import LessonResponse, ErrorResponse, QuestionListResponse, GenerateLessonRequest
 
 # --- Configuration ---
 load_dotenv()
@@ -40,11 +36,8 @@ except Exception as e:
 app = FastAPI(title="LessonGenie API")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-
-# Define a temporary directory base (optional, but good practice)
 TEMP_DIR_BASE = "temp_uploads"
 pathlib.Path(TEMP_DIR_BASE).mkdir(exist_ok=True)
-
 
 # --- API Endpoints ---
 
@@ -53,19 +46,18 @@ async def read_root(request: Request):
     """Serves the main HTML page."""
     return templates.TemplateResponse("index.html", {"request": request})
 
-@app.post("/generate-lesson", response_model=Union[LessonResponse, ErrorResponse])
-async def generate_lesson_endpoint(
-    request: Request,
-    pdf_file: UploadFile = File(..., description="The PDF exam paper to analyze."),
-    question_description: str = Form(..., description="A description of the question to explain (e.g., 'Question 3a').")
+@app.post("/extract-questions", response_model=Union[QuestionListResponse, ErrorResponse])
+async def extract_questions_endpoint(
+    pdf_file: UploadFile = File(..., description="The PDF exam paper to analyze.")
 ):
     """
-    API endpoint to upload a PDF, generate a structured lesson for a specific
-    question using Gemini, and return the lesson JSON.
+    Uploads a PDF, extracts questions using Gemini, returns the list of questions
+    and the File API ID (name) of the uploaded PDF.
+    Does NOT delete the PDF from File API yet.
     """
-    print(f"\nReceived request to generate lesson for: '{question_description}'")
-    uploaded_gemini_file_obj: Optional[GeminiFile] = None
-    temp_dir_path: Optional[str] = None # Keep track of temp directory
+    print("\nReceived request to extract questions from PDF.")
+    temp_dir_path: Optional[str] = None
+    uploaded_gemini_file_obj = None # Keep track to potentially delete if extraction fails mid-way
 
     try:
         # --- Step 1: Save Uploaded File Temporarily ---
@@ -73,56 +65,58 @@ async def generate_lesson_endpoint(
         if not pdf_content:
             raise HTTPException(status_code=400, detail="PDF file is empty.")
 
-        # Create a unique temporary directory for this request
         temp_dir_path = tempfile.mkdtemp(dir=TEMP_DIR_BASE)
-        # Create the full path for the temporary file
         temp_pdf_path = os.path.join(temp_dir_path, pdf_file.filename or "temp_upload.pdf")
 
         print(f"Saving uploaded file temporarily to: {temp_pdf_path}")
         with open(temp_pdf_path, "wb") as temp_pdf:
             temp_pdf.write(pdf_content)
 
-        # --- Step 2: Upload the *Temporary File* to Gemini ---
+        # --- Step 2: Upload the Temporary File to Gemini ---
         display_name = pdf_file.filename or "uploaded_exam.pdf"
         uploaded_gemini_file_obj = gemini_utils.upload_pdf_to_gemini(
-            pdf_path=temp_pdf_path, # Pass the path to the temporary file
+            pdf_path=temp_pdf_path,
             display_name=display_name
         )
         if not uploaded_gemini_file_obj:
             raise HTTPException(status_code=500, detail="Failed to upload PDF to Gemini File API.")
 
-        # --- Step 3: Generate Lesson using Gemini ---
-        lesson_response_model = gemini_utils.generate_structured_lesson(
+        # --- Step 3: Extract Questions using Gemini ---
+        question_list_response = gemini_utils.extract_questions_from_pdf(
             uploaded_file=uploaded_gemini_file_obj,
-            question_description=question_description,
-            model_name="gemini-1.5-flash-latest"
+            model_name="gemini-1.5-flash-latest" # Or pro if needed
         )
 
-        if not lesson_response_model:
-            raise HTTPException(status_code=500, detail="Failed to generate or validate lesson content from Gemini.")
+        if not question_list_response:
+            # Extraction failed, delete the file we just uploaded
+            if uploaded_gemini_file_obj:
+                 gemini_utils.delete_uploaded_file(uploaded_gemini_file_obj.name)
+            raise HTTPException(status_code=500, detail="Failed to extract questions from the PDF.")
 
-        # --- Step 4: Return Successful Response ---
-        print("Successfully generated and validated lesson. Returning to client.")
-        return lesson_response_model
+        # --- Step 4: Return Successful Question List ---
+        print("Successfully extracted questions. Returning list to client.")
+        # We need pdfFileId in the response for the next step
+        if not question_list_response.pdfFileId:
+             question_list_response.pdfFileId = uploaded_gemini_file_obj.name # Ensure it's set
+
+        return question_list_response # FastAPI handles serialization
 
     except HTTPException as http_exc:
-        raise http_exc # Let FastAPI handle known HTTP errors
+        # If upload failed before gemini obj was created, we only clean up local temp
+        if uploaded_gemini_file_obj: # Clean up Gemini file if upload succeeded but extraction failed
+             gemini_utils.delete_uploaded_file(uploaded_gemini_file_obj.name)
+        raise http_exc
     except Exception as e:
-        print(f"--- Unexpected Error in /generate-lesson endpoint: {e} ---")
-        # import traceback # Uncomment for detailed debugging
-        # traceback.print_exc()
+        print(f"--- Unexpected Error in /extract-questions endpoint: {e} ---")
+        if uploaded_gemini_file_obj: # Clean up Gemini file on generic error too
+             gemini_utils.delete_uploaded_file(uploaded_gemini_file_obj.name)
         return JSONResponse(
             status_code=500,
-            content=ErrorResponse(detail="An unexpected server error occurred.").model_dump()
+            content=ErrorResponse(detail="An unexpected server error occurred during question extraction.").model_dump()
         )
-
     finally:
-        # --- Step 5: Cleanup ---
-        print("--- Endpoint finished, initiating cleanup ---")
-        # Delete file from Gemini servers
-        if uploaded_gemini_file_obj:
-             gemini_utils.delete_uploaded_file(uploaded_gemini_file_obj)
-        # Delete the local temporary directory and its contents
+        # --- Step 5: Cleanup Local Temporary File ---
+        # Gemini file cleanup happens ONLY if extraction fails OR in the generate lesson endpoint
         if temp_dir_path and os.path.exists(temp_dir_path):
             try:
                 print(f"Removing temporary directory: {temp_dir_path}")
@@ -132,12 +126,60 @@ async def generate_lesson_endpoint(
                 print(f"--- Warning: Failed to remove temporary directory {temp_dir_path}: {cleanup_error} ---")
 
 
+@app.post("/generate-specific-lesson", response_model=Union[LessonResponse, ErrorResponse])
+async def generate_specific_lesson_endpoint(
+    # Use Pydantic model for request body
+    request_data: GenerateLessonRequest = Body(...)
+):
+    """
+    Generates a detailed lesson for a specific question, referencing the
+    PDF already uploaded via its File API ID (name).
+    Deletes the PDF from File API after generating the lesson.
+    """
+    print(f"\nReceived request to generate lesson for Q_ID: '{request_data.selectedQuestionId}' from File ID: '{request_data.pdfFileId}'")
+    pdf_file_id_to_delete = request_data.pdfFileId # Store ID for cleanup
+
+    try:
+        # --- Step 1: Generate Lesson using Gemini ---
+        lesson_response_model = gemini_utils.generate_structured_lesson(
+            pdf_file_id=request_data.pdfFileId,
+            selected_question_id=request_data.selectedQuestionId,
+            selected_question_text=request_data.selectedQuestionText, # Pass optional text
+            model_name="gemini-1.5-flash-latest"
+        )
+
+        if not lesson_response_model:
+            # Attempting generation failed (e.g., file expired, AI error)
+            # We might still try to delete the file ID if it was invalid
+            raise HTTPException(status_code=500, detail="Failed to generate or validate lesson content from Gemini.")
+
+        # --- Step 2: Return Successful Response ---
+        print("Successfully generated specific lesson. Returning to client.")
+        return lesson_response_model
+
+    except HTTPException as http_exc:
+        # Don't try deleting file on HTTP error typically raised before generation attempt
+        raise http_exc
+    except Exception as e:
+        print(f"--- Unexpected Error in /generate-specific-lesson endpoint: {e} ---")
+        return JSONResponse(
+            status_code=500,
+            content=ErrorResponse(detail="An unexpected server error occurred during lesson generation.").model_dump()
+        )
+    finally:
+        # --- Step 3: Cleanup - Delete the referenced PDF from Gemini File API ---
+        print("--- Specific Lesson Endpoint finished, initiating file cleanup ---")
+        if pdf_file_id_to_delete:
+             gemini_utils.delete_uploaded_file(pdf_file_id_to_delete)
+        else:
+             print("No PDF File ID was provided in the request for cleanup.")
+
+
 # --- Run the App (for local development) ---
 if __name__ == "__main__":
     print("Starting LessonGenie FastAPI server...")
-    # Ensure necessary directories exist
     pathlib.Path(TEMP_DIR_BASE).mkdir(exist_ok=True)
-    pathlib.Path("lesson_outputs").mkdir(exist_ok=True) # If you use save_lesson_to_json
+    pathlib.Path("lesson_outputs").mkdir(exist_ok=True) # If using save function
 
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
 
