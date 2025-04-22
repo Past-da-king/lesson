@@ -42,7 +42,7 @@ question_list_response_schema = {
 }
 
 
-# --- Schema for Lesson Generation (Copied from previous working version) ---
+# --- Schema for Lesson G   eneration (Copied from previous working version) ---
 step_schema = {
     "type": "OBJECT", "properties": {"stepNumber": {"type": "INTEGER"}, "title": {"type": "STRING"}, "descriptionHtml": {"type": "STRING"}}, "required": ["stepNumber", "title", "descriptionHtml"]
 }
